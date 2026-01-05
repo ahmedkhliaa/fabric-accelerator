@@ -133,7 +133,7 @@ jobs:
           run: |
               fab exists $WORKSPACE_NAME.Workspace/elt-framework.Folder/$FABRIC_SQL_DB_NAME.SQLDatabase | grep -q true || fab create $WORKSPACE_NAME.Workspace/elt-framework.Folder/$FABRIC_SQL_DB_NAME.SQLDatabase
 
-      # Create Fabric SQL database connection if it does not exist
+        # Create Fabric SQL database connection if it does not exist
         - name: Create FSQL DB Connection if it does not exist
           run: |
               FSQLConnExists=$(fab exists .connections/"${WORKSPACE_NAME}-${FABRIC_SQL_DB_NAME}".Connection | tr -d '[:space:]')
@@ -143,7 +143,7 @@ jobs:
                 # FIX 1: Force 'Yes' to bypass label warning
                 raw_server=$(echo "Y" | fab get $WORKSPACE_NAME.Workspace/$FABRIC_SQL_DB_NAME.SQLDatabase -q properties.serverFqdn | tail -n 1 | tr -d '\r')
                 
-                # FIX 2: Remove the port number (,1433) if it exists, just to be safe
+                # FIX 2: Remove the port number (,1433) if it exists
                 server=$(echo "$raw_server" | cut -d',' -f1)
                 
                 # FIX 3: Use the name we already know
@@ -154,8 +154,8 @@ jobs:
 
                 echo "Creating connection for server: $server and database: $database"
                 
-                # FIX 4: Changed 'tenantid' to 'tenantId' (Case Sensitive!) and added quotes around secrets
-                fab create .connections/"${WORKSPACE_NAME}-${FABRIC_SQL_DB_NAME}".Connection -P connectionDetails.creationMethod=SQL,connectionDetails.type=SQL,connectionDetails.parameters.server=$server,connectionDetails.parameters.database=$database,credentialDetails.type=ServicePrincipal,credentialDetails.servicePrincipalClientId="${{ secrets.ACTION_SPN_CLIENTID }}",credentialDetails.servicePrincipalSecret="${{ secrets.ACTION_SPN_SECRET }}",credentialDetails.tenantId="${{ secrets.TENANT_ID }}"
+                # FIX 4: Added privacyLevel, encryptConnection, and trustServerCertificate
+                fab create .connections/"${WORKSPACE_NAME}-${FABRIC_SQL_DB_NAME}".Connection -P connectionDetails.creationMethod=SQL,connectionDetails.type=SQL,connectionDetails.parameters.server="$server",connectionDetails.parameters.database="$database",connectionDetails.parameters.encryptConnection="True",connectionDetails.parameters.trustServerCertificate="True",credentialDetails.type=ServicePrincipal,credentialDetails.servicePrincipalClientId="${{ secrets.ACTION_SPN_CLIENTID }}",credentialDetails.servicePrincipalSecret="${{ secrets.ACTION_SPN_SECRET }}",credentialDetails.tenantId="${{ secrets.TENANT_ID }}",credentialDetails.privacyLevel=Organizational
                 
                 connectionID=$(fab get .connections/"${WORKSPACE_NAME}-${FABRIC_SQL_DB_NAME}".Connection -q id| tr -d '\r')
                 
