@@ -133,22 +133,27 @@ jobs:
           run: |
               fab exists $WORKSPACE_NAME.Workspace/elt-framework.Folder/$FABRIC_SQL_DB_NAME.SQLDatabase | grep -q true || fab create $WORKSPACE_NAME.Workspace/elt-framework.Folder/$FABRIC_SQL_DB_NAME.SQLDatabase
 
-       # Create Fabric SQL database connection if it does not exist
+      # Create Fabric SQL database connection if it does not exist
         - name: Create FSQL DB Connection if it does not exist
           run: |
               FSQLConnExists=$(fab exists .connections/"${WORKSPACE_NAME}-${FABRIC_SQL_DB_NAME}".Connection | tr -d '[:space:]')
               echo "FSQLConnExists: $FSQLConnExists"
+              
               if [ "$FSQLConnExists" != "*true" ]; then
-                server=$(fab get $WORKSPACE_NAME.Workspace/$FABRIC_SQL_DB_NAME.SQLDatabase -q properties.serverFqdn| tr -d '\r')
-                database=$(fab get $WORKSPACE_NAME.Workspace/$FABRIC_SQL_DB_NAME.SQLDatabase -q properties.databaseName| tr -d '\r') 
+                # FIX: Force 'Yes' to bypass the sensitive label question and grab only the server address
+                server=$(echo "Y" | fab get $WORKSPACE_NAME.Workspace/$FABRIC_SQL_DB_NAME.SQLDatabase -q properties.serverFqdn | tail -n 1 | tr -d '\r')
+                
+                # FIX: Just use the name we already know
+                database=$FABRIC_SQL_DB_NAME
+                
                 echo "Creating connection for server: $server and database: $database"
+                
                 fab create .connections/"${WORKSPACE_NAME}-${FABRIC_SQL_DB_NAME}".Connection -P connectionDetails.creationMethod=SQL,connectionDetails.type=SQL,connectionDetails.parameters.server=$server,connectionDetails.parameters.database=$database,credentialDetails.type=ServicePrincipal,credentialDetails.servicePrincipalClientId=${{ secrets.ACTION_SPN_CLIENTID }},credentialDetails.servicePrincipalSecret=${{ secrets.ACTION_SPN_SECRET }},credentialDetails.tenantid=${{ secrets.TENANT_ID }} 
                 connectionID=$(fab get .connections/"${WORKSPACE_NAME}-${FABRIC_SQL_DB_NAME}".Connection -q id| tr -d '\r')
                 
-                rolejson=$(jq -n --arg id "$WORKSPACE_ADMIN_ID" --arg type "${WORKSPACE_ADMIN_TYPE^}" '{"principal": {"id": $id, "type": $type}, "role": "Owner"}')         
+                rolejson=$(jq -n --arg id "$WORKSPACE_ADMIN_ID" --arg type "${WORKSPACE_ADMIN_TYPE^}" '{"principal": {"id": $id, "type": $type}, "role": "Owner"}')          
                 echo "Assigning role to connection: $rolejson"
                 fab api -X post "connections/$connectionID/roleAssignments" -i "$rolejson" --show_headers
-
               fi
           # Create Medallion Layers if they do not exist
         - name: Create Medallion Layers if they do not exist
