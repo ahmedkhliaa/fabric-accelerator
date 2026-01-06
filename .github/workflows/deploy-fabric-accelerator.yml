@@ -133,22 +133,64 @@ jobs:
           run: |
               fab exists $WORKSPACE_NAME.Workspace/elt-framework.Folder/$FABRIC_SQL_DB_NAME.SQLDatabase | grep -q true || fab create $WORKSPACE_NAME.Workspace/elt-framework.Folder/$FABRIC_SQL_DB_NAME.SQLDatabase
 
-       # Create Fabric SQL database connection if it does not exist
+      # Create Fabric SQL database connection if it does not exist
         - name: Create FSQL DB Connection if it does not exist
           run: |
               FSQLConnExists=$(fab exists .connections/"${WORKSPACE_NAME}-${FABRIC_SQL_DB_NAME}".Connection | tr -d '[:space:]')
               echo "FSQLConnExists: $FSQLConnExists"
+              
               if [ "$FSQLConnExists" != "*true" ]; then
-                server=$(fab get $WORKSPACE_NAME.Workspace/$FABRIC_SQL_DB_NAME.SQLDatabase -q properties.serverFqdn| tr -d '\r')
-                database=$(fab get $WORKSPACE_NAME.Workspace/$FABRIC_SQL_DB_NAME.SQLDatabase -q properties.databaseName| tr -d '\r') 
-                echo "Creating connection for server: $server and database: $database"
-                fab create .connections/"${WORKSPACE_NAME}-${FABRIC_SQL_DB_NAME}".Connection -P connectionDetails.creationMethod=SQL,connectionDetails.type=SQL,connectionDetails.parameters.server=$server,connectionDetails.parameters.database=$database,credentialDetails.type=ServicePrincipal,credentialDetails.servicePrincipalClientId=${{ secrets.ACTION_SPN_CLIENTID }},credentialDetails.servicePrincipalSecret=${{ secrets.ACTION_SPN_SECRET }},credentialDetails.tenantid=${{ secrets.TENANT_ID }} 
-                connectionID=$(fab get .connections/"${WORKSPACE_NAME}-${FABRIC_SQL_DB_NAME}".Connection -q id| tr -d '\r')
+                # FIX 1: Force 'Yes' to bypass the sensitive label question
+                raw_server=$(echo "Y" | fab get $WORKSPACE_NAME.Workspace/$FABRIC_SQL_DB_NAME.SQLDatabase -q properties.serverFqdn | tail -n 1 | tr -d '\r')
+                server=$(echo "$raw_server" | cut -d',' -f1)
+                database=$FABRIC_SQL_DB_NAME
+                displayName="${WORKSPACE_NAME}-${FABRIC_SQL_DB_NAME}"
                 
-                rolejson=$(jq -n --arg id "$WORKSPACE_ADMIN_ID" --arg type "${WORKSPACE_ADMIN_TYPE^}" '{"principal": {"id": $id, "type": $type}, "role": "Owner"}')         
+                echo "Server: $server"
+                echo "Waiting 60 seconds for SQL Database to warm up..."
+                sleep 60
+
+                # FIX 2: Manual JSON payload to force Organizational Privacy Level & Encryption
+                # We use jq to safely insert the secrets so they don't leak in logs
+                json_payload=$(jq -n \
+                  --arg displayName "$displayName" \
+                  --arg server "$server" \
+                  --arg database "$database" \
+                  --arg clientId "${{ secrets.ACTION_SPN_CLIENTID }}" \
+                  --arg clientSecret "${{ secrets.ACTION_SPN_SECRET }}" \
+                  --arg tenantId "${{ secrets.TENANT_ID }}" \
+                  '{
+                    "displayName": $displayName,
+                    "type": "SQL",
+                    "privacyLevel": "Organizational",
+                    "connectionDetails": {
+                      "server": $server,
+                      "database": $database
+                    },
+                    "credentialDetails": {
+                      "credentialType": "ServicePrincipal",
+                      "credentials": {
+                        "servicePrincipalClientId": $clientId,
+                        "servicePrincipalSecret": $clientSecret,
+                        "tenantId": $tenantId
+                      },
+                      "encryptedConnection": "Encrypted",
+                      "encryptionAlgorithm": "None",
+                      "privacyLevel": "Organizational"
+                    }
+                  }')
+
+                echo "Sending Direct API Request..."
+                # FIX 3: Corrected URL (NO v1/)
+                fab api -X post "connections" -i "$json_payload" --show_headers
+                
+                # 3. Retrieve the ID of the connection we just created
+                connectionID=$(fab get .connections/"$displayName".Connection -q id | tr -d '\r')
+                
+                # 4. Assign Role
+                rolejson=$(jq -n --arg id "$WORKSPACE_ADMIN_ID" --arg type "${WORKSPACE_ADMIN_TYPE^}" '{"principal": {"id": $id, "type": $type}, "role": "Owner"}')          
                 echo "Assigning role to connection: $rolejson"
                 fab api -X post "connections/$connectionID/roleAssignments" -i "$rolejson" --show_headers
-
               fi
           # Create Medallion Layers if they do not exist
         - name: Create Medallion Layers if they do not exist
