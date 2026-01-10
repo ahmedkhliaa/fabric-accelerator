@@ -133,16 +133,17 @@ jobs:
           run: |
               fab exists $WORKSPACE_NAME.Workspace/elt-framework.Folder/$FABRIC_SQL_DB_NAME.SQLDatabase | grep -q true || fab create $WORKSPACE_NAME.Workspace/elt-framework.Folder/$FABRIC_SQL_DB_NAME.SQLDatabase
 
-      # Create Fabric SQL database connection if it does not exist
+# Create Fabric SQL database connection if it does not exist
         - name: Create FSQL DB Connection if it does not exist
           run: |
               FSQLConnExists=$(fab exists .connections/"${WORKSPACE_NAME}-${FABRIC_SQL_DB_NAME}".Connection | tr -d '[:space:]')
               echo "FSQLConnExists: $FSQLConnExists"
               
               if [ "$FSQLConnExists" != "*true" ]; then
-                # 1. Get Server Address (Force 'Yes' to bypass prompt)
+                # FIX 1: Bypass 'Are you sure?' prompt and clean the server name output
                 raw_server=$(echo "Y" | fab get $WORKSPACE_NAME.Workspace/$FABRIC_SQL_DB_NAME.SQLDatabase -q properties.serverFqdn | tail -n 1 | tr -d '\r')
                 server=$(echo "$raw_server" | cut -d',' -f1)
+                
                 database=$FABRIC_SQL_DB_NAME
                 displayName="${WORKSPACE_NAME}-${FABRIC_SQL_DB_NAME}"
                 
@@ -150,7 +151,7 @@ jobs:
                 echo "Waiting 60 seconds for SQL Database to warm up..."
                 sleep 60
 
-                # 2. Build the JSON Payload (FIXED: Added 'parameters' wrapper)
+                # FIX 2: Correct Nested JSON Structure for SQL Connection
                 json_payload=$(jq -n \
                   --arg displayName "$displayName" \
                   --arg server "$server" \
@@ -163,8 +164,8 @@ jobs:
                     "type": "SQL",
                     "privacyLevel": "Organizational",
                     "connectionDetails": {
-                      "creationMethod": "SQL",
                       "type": "SQL",
+                      "creationMethod": "SQL",
                       "parameters": {
                         "server": $server,
                         "database": $database
@@ -184,12 +185,12 @@ jobs:
                   }')
 
                 echo "Sending Direct API Request..."
+                # FIX 3: Correct URL (No 'v1/')
                 fab api -X post "connections" -i "$json_payload" --show_headers
                 
-                # 3. Retrieve the ID of the connection we just created
+                # 3. Retrieve ID and Assign Role
                 connectionID=$(fab get .connections/"$displayName".Connection -q id | tr -d '\r')
                 
-                # 4. Assign Role
                 rolejson=$(jq -n --arg id "$WORKSPACE_ADMIN_ID" --arg type "${WORKSPACE_ADMIN_TYPE^}" '{"principal": {"id": $id, "type": $type}, "role": "Owner"}')          
                 echo "Assigning role to connection: $rolejson"
                 fab api -X post "connections/$connectionID/roleAssignments" -i "$rolejson" --show_headers
