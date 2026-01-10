@@ -140,10 +140,9 @@ jobs:
               echo "FSQLConnExists: $FSQLConnExists"
               
               if [ "$FSQLConnExists" != "*true" ]; then
-                # FIX 1: Bypass 'Are you sure?' prompt and clean the server name output
+                # 1. Get Server Address
                 raw_server=$(echo "Y" | fab get $WORKSPACE_NAME.Workspace/$FABRIC_SQL_DB_NAME.SQLDatabase -q properties.serverFqdn | tail -n 1 | tr -d '\r')
                 server=$(echo "$raw_server" | cut -d',' -f1)
-                
                 database=$FABRIC_SQL_DB_NAME
                 displayName="${WORKSPACE_NAME}-${FABRIC_SQL_DB_NAME}"
                 
@@ -151,7 +150,8 @@ jobs:
                 echo "Waiting 60 seconds for SQL Database to warm up..."
                 sleep 60
 
-                # FIX 2: SIMPLIFIED JSON Payload (No 'creationMethod', No 'parameters' wrapper)
+                # 2. JSON Payload: The "Cloud Connection" Structure
+                # Note: We use 'skipTestConnection=True' in the URL to bypass immediate validation errors
                 json_payload=$(jq -n \
                   --arg displayName "$displayName" \
                   --arg server "$server" \
@@ -169,6 +169,7 @@ jobs:
                     },
                     "credentialDetails": {
                       "credentialType": "ServicePrincipal",
+                      "useEndUserOAuth2Credentials": false,
                       "credentials": {
                         "servicePrincipalClientId": $clientId,
                         "servicePrincipalSecret": $clientSecret,
@@ -181,11 +182,19 @@ jobs:
                   }')
 
                 echo "Sending Direct API Request..."
-                fab api -X post "connections" -i "$json_payload" --show_headers
+                # FIX: Added skipTestConnection=True to force creation
+                fab api -X post "connections?skipTestConnection=True" -i "$json_payload" --show_headers
                 
                 # 3. Retrieve ID and Assign Role
+                # We wait 5 seconds to ensure the ID is retrievable
+                sleep 5
                 connectionID=$(fab get .connections/"$displayName".Connection -q id | tr -d '\r')
                 
+                if [ -z "$connectionID" ]; then
+                    echo "ERROR: Connection ID not found. Creation might have failed."
+                    exit 1
+                fi
+
                 rolejson=$(jq -n --arg id "$WORKSPACE_ADMIN_ID" --arg type "${WORKSPACE_ADMIN_TYPE^}" '{"principal": {"id": $id, "type": $type}, "role": "Owner"}')          
                 echo "Assigning role to connection: $rolejson"
                 fab api -X post "connections/$connectionID/roleAssignments" -i "$rolejson" --show_headers
