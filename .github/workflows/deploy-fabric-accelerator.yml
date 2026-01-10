@@ -151,7 +151,7 @@ jobs:
                 echo "Waiting 60 seconds for SQL Database to warm up..."
                 sleep 60
 
-                # FIX 2: Correct Nested JSON Structure for SQL Connection
+                # FIX 2: Simplified JSON Payload (Removed 'creationMethod' and 'parameters' wrapper)
                 json_payload=$(jq -n \
                   --arg displayName "$displayName" \
                   --arg server "$server" \
@@ -164,12 +164,8 @@ jobs:
                     "type": "SQL",
                     "privacyLevel": "Organizational",
                     "connectionDetails": {
-                      "type": "SQL",
-                      "creationMethod": "SQL",
-                      "parameters": {
-                        "server": $server,
-                        "database": $database
-                      }
+                      "server": $server,
+                      "database": $database
                     },
                     "credentialDetails": {
                       "credentialType": "ServicePrincipal",
@@ -185,7 +181,6 @@ jobs:
                   }')
 
                 echo "Sending Direct API Request..."
-                # FIX 3: Correct URL (No 'v1/')
                 fab api -X post "connections" -i "$json_payload" --show_headers
                 
                 # 3. Retrieve ID and Assign Role
