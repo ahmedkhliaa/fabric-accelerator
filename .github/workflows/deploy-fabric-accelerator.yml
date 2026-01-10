@@ -150,12 +150,8 @@ jobs:
                 echo "Waiting 60 seconds for SQL Database to warm up..."
                 sleep 60
 
-                # ---------------------------------------------------------
-                # ATTEMPT 1: Standard 'SQL' Type
-                # ---------------------------------------------------------
-                echo "Attempting creation with Type: SQL..."
-                
-                json_payload_sql=$(jq -n \
+                # 2. JSON Payload: SQL Type WITH Parameters Wrapper (The correct API standard)
+                json_payload=$(jq -n \
                   --arg displayName "$displayName" \
                   --arg server "$server" \
                   --arg database "$database" \
@@ -167,8 +163,11 @@ jobs:
                     "type": "SQL",
                     "privacyLevel": "Organizational",
                     "connectionDetails": {
-                      "server": $server,
-                      "database": $database
+                      "type": "SQL",
+                      "parameters": {
+                        "server": $server,
+                        "database": $database
+                      }
                     },
                     "credentialDetails": {
                       "credentialType": "ServicePrincipal",
@@ -184,55 +183,10 @@ jobs:
                     }
                   }')
 
-                # Print payload for debugging (secrets masked)
-                echo "Payload 1 (SQL): $json_payload_sql"
+                echo "Sending Direct API Request..."
+                fab api -X post "connections?skipTestConnection=True" -i "$json_payload" --show_headers
                 
-                # Try create (capture output to variable to check success)
-                response=$(fab api -X post "connections?skipTestConnection=True" -i "$json_payload_sql" --show_headers 2>&1)
-                echo "$response"
-
-                # Check if it failed
-                if echo "$response" | grep -q '"status_code": 201' || echo "$response" | grep -q '"status_code": 200'; then
-                    echo "SUCCESS: Connection created with Type SQL."
-                else
-                    # ---------------------------------------------------------
-                    # ATTEMPT 2: Fallback to 'AzureSql' Type
-                    # ---------------------------------------------------------
-                    echo "FAILED. Retrying with Type: AzureSql..."
-                    
-                    json_payload_az=$(jq -n \
-                      --arg displayName "$displayName" \
-                      --arg server "$server" \
-                      --arg database "$database" \
-                      --arg clientId "${{ secrets.ACTION_SPN_CLIENTID }}" \
-                      --arg clientSecret "${{ secrets.ACTION_SPN_SECRET }}" \
-                      --arg tenantId "${{ secrets.TENANT_ID }}" \
-                      '{
-                        "displayName": $displayName,
-                        "type": "AzureSql",
-                        "privacyLevel": "Organizational",
-                        "connectionDetails": {
-                          "server": $server,
-                          "database": $database
-                        },
-                        "credentialDetails": {
-                          "credentialType": "ServicePrincipal",
-                          "useEndUserOAuth2Credentials": false,
-                          "credentials": {
-                            "servicePrincipalClientId": $clientId,
-                            "servicePrincipalSecret": $clientSecret,
-                            "tenantId": $tenantId
-                          },
-                          "encryptedConnection": "Encrypted",
-                          "encryptionAlgorithm": "None",
-                          "privacyLevel": "Organizational"
-                        }
-                      }')
-                    
-                    fab api -X post "connections?skipTestConnection=True" -i "$json_payload_az" --show_headers
-                fi
-
-                # 4. Assign Role (Needs delay to ensure ID is indexed)
+                # 3. Retrieve ID and Assign Role
                 sleep 5
                 connectionID=$(fab get .connections/"$displayName".Connection -q id | tr -d '\r')
                 
@@ -240,9 +194,6 @@ jobs:
                     rolejson=$(jq -n --arg id "$WORKSPACE_ADMIN_ID" --arg type "${WORKSPACE_ADMIN_TYPE^}" '{"principal": {"id": $id, "type": $type}, "role": "Owner"}')          
                     echo "Assigning role to connection: $rolejson"
                     fab api -X post "connections/$connectionID/roleAssignments" -i "$rolejson" --show_headers
-                else
-                    echo "WARNING: Could not retrieve Connection ID. Role assignment skipped."
-                    exit 1
                 fi
               fi
           # Create Medallion Layers if they do not exist
