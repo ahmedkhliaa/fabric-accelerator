@@ -151,7 +151,7 @@ jobs:
                 echo "Waiting 60 seconds for SQL Database to warm up..."
                 sleep 60
 
-                # FIX 2: Simplified JSON Payload (Removed 'creationMethod' and 'parameters' wrapper)
+                # FIX 2: SIMPLIFIED JSON Payload (No 'creationMethod', No 'parameters' wrapper)
                 json_payload=$(jq -n \
                   --arg displayName "$displayName" \
                   --arg server "$server" \
