@@ -140,7 +140,7 @@ jobs:
               echo "FSQLConnExists: $FSQLConnExists"
               
               if [ "$FSQLConnExists" != "*true" ]; then
-                # FIX 1: Force 'Yes' to bypass the sensitive label question
+                # 1. Get Server Address (Force 'Yes' to bypass prompt)
                 raw_server=$(echo "Y" | fab get $WORKSPACE_NAME.Workspace/$FABRIC_SQL_DB_NAME.SQLDatabase -q properties.serverFqdn | tail -n 1 | tr -d '\r')
                 server=$(echo "$raw_server" | cut -d',' -f1)
                 database=$FABRIC_SQL_DB_NAME
@@ -150,8 +150,7 @@ jobs:
                 echo "Waiting 60 seconds for SQL Database to warm up..."
                 sleep 60
 
-                # FIX 2: Manual JSON payload to force Organizational Privacy Level & Encryption
-                # We use jq to safely insert the secrets so they don't leak in logs
+                # 2. Build the JSON Payload (FIXED: Added 'parameters' wrapper)
                 json_payload=$(jq -n \
                   --arg displayName "$displayName" \
                   --arg server "$server" \
@@ -164,8 +163,12 @@ jobs:
                     "type": "SQL",
                     "privacyLevel": "Organizational",
                     "connectionDetails": {
-                      "server": $server,
-                      "database": $database
+                      "creationMethod": "SQL",
+                      "type": "SQL",
+                      "parameters": {
+                        "server": $server,
+                        "database": $database
+                      }
                     },
                     "credentialDetails": {
                       "credentialType": "ServicePrincipal",
@@ -181,7 +184,6 @@ jobs:
                   }')
 
                 echo "Sending Direct API Request..."
-                # FIX 3: Corrected URL (NO v1/)
                 fab api -X post "connections" -i "$json_payload" --show_headers
                 
                 # 3. Retrieve the ID of the connection we just created
